@@ -49,8 +49,8 @@ void printChunkData(
     }
 
     const u_int64_t POLY = INT64(0xbe87a30a3487a395);
-    window* rw = new window(POLY);
-    rabinpoly* rp = new rabinpoly(POLY);
+    window rw(POLY);
+    rabinpoly rp(POLY);
 
     FILE* is = fopen(argv[1], "r");
 
@@ -62,21 +62,19 @@ void printChunkData(
     {
       ++size;
 
-      hash = rp->append8(hash, (char)next);
-      val = rw->slide8((char)next);
+      hash = rp.append8(hash, (char)next);
+      val = rw.slide8((char)next);
       //break (on average) every 2^14 bytes
       if( (val & INT64(0x0000000000003fff)) == 0 )
       {
           printChunkData("Found", size, val, hash);
           size = 0;
           hash = 0;
-          rw->reset();
+          rw.reset();
       }
     }
 
     fclose(is);
 
     printChunkData("Last ", size, val, hash);
-
-    delete rw;
   }
