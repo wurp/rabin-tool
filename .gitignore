@@ -1,0 +1,4 @@
+*.rabin
+*.o
+*.a
+src/rabin
