@@ -26,6 +26,7 @@
 
 #define INT64(n) n##LL
 #define MSB64 INT64(0x8000000000000000)
+#define FINGERPRINT_PT 0xbfe6b8a5bf378d83LL	
 
 void printChunkData(
     char* msgPrefix,
@@ -40,6 +41,20 @@ void printChunkData(
          size);
 }
 
+u_int64_t makeBitMask(int maskSize)
+{
+  u_int64_t retval = 0;
+
+  u_int64_t currBit = 1;
+  for(int i = 0; i < maskSize; ++i)
+  {
+    retval |= currBit;
+    currBit <<= 1;
+  }
+
+  return retval;
+}
+
   int main(int argc, char **argv)
   {
     if( argc < 2 )
@@ -48,7 +63,7 @@ void printChunkData(
       exit(-1);
     }
 
-    const u_int64_t POLY = INT64(0xbe87a30a3487a395);
+    const u_int64_t POLY = FINGERPRINT_PT;
     window rw(POLY);
     rabinpoly rp(POLY);
 
@@ -58,14 +73,20 @@ void printChunkData(
     int size = 0;
     u_int64_t val = 0;
     u_int64_t hash = 0;
+
+    //break (on average) every 2^14 bytes
+    u_int64_t chunkBoundaryBitMask = makeBitMask(14);
+    //printf("bitmask: %16llx\n", chunkBoundaryBitMask);
+    //exit(0);
+
     while((next = fgetc(is)) != -1)
     {
       ++size;
 
       hash = rp.append8(hash, (char)next);
       val = rw.slide8((char)next);
-      //break (on average) every 2^14 bytes
-      if( (val & INT64(0x0000000000003fff)) == 0 )
+
+      if( (val & chunkBoundaryBitMask) == 0 )
       {
           printChunkData("Found", size, val, hash);
           size = 0;
