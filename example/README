@@ -1,0 +1,44 @@
+
+HOW TO COMPILE THIS EXAMPLE 
+---------------------------
+After compiling the rabinpoly library (i.e., do make in the top directory)
+do 'make' in this directory. You don't have to install the rabinpoly library
+as long as you have the compiled library librabinpoly.a in ../src. 
+
+This will create an executable, example1. 
+
+
+HOW TO RUN
+----------
+Let's try the following command.
+
+> example1 testfile 16
+
+What this does is to read "testfile" and compute rabin fingerprints
+while reading the bytes in the testfile one by one. The sliding window
+size we use in this example is 16. 
+
+
+MORE DETAIL
+-----------
+Let's look at the source code, example1.cpp.
+The only thing you need to look at is, how I used the rabinpoly class,
+"window". 
+
+  // Initialize the class
+  window myRabin(FINGERPRINT_PT, windowsize);
+  
+  // Supply a byte, and get the rabin fingerprint of the current sliding window
+  rabinf = myRabin.slide8(buf[i]);
+
+  // The 'window' class holds the bytes in the sliding window. 
+  // If you want to reset the data structure and empty the buffer, just do
+  myRbin.reset();
+  
+
+
+If you have any question, contact hakim@cs.cmu.edu.
+
+Thank you.
+
+
