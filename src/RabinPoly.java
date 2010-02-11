@@ -23,20 +23,6 @@
 class LoggerDummy
 {
   boolean isDebugEnabled() { return false; }
-  public void debug(Object... obj)
-  {
-    if( isDebugEnabled() )
-    {
-      Object[] vars = new Object[obj.length - 1];
-
-      for(int i = 0; i < vars.length; ++i)
-      {
-        vars[i] = obj[i+1];
-      }
-
-      System.out.printf((String)obj[0], vars);
-    }
-  }
 }
 
 public class RabinPoly
@@ -66,44 +52,57 @@ public class RabinPoly
   private static /*unsigned*/ long
   polymod (/*unsigned*/ long nh, /*unsigned*/ long nl, /*unsigned*/ long d)
   {
-    mLogger.debug("polymod (nh %llu nl %llu d %llu)\n", nh, nl, d);
-
+    if( mLogger.isDebugEnabled() )
+    {
+      System.out.printf ("polymod (nh %llu nl %llu d %llu)\n", nh, nl, d);
+    }
     int k = MostSignificantBitUtil.fls (d) - 1;
-
-    mLogger.debug ("polymod : k = %d\n", k);
-
+    if( mLogger.isDebugEnabled() )
+    {
+    System.out.printf ("polymod : k = %d\n", k);
+    }
     d <<= 63 - k;
-
-    mLogger.debug ("polymod : d = %llu\n", d);
-    mLogger.debug ("polymod : MSB64 = %llu\n", MSB64);
+    if( mLogger.isDebugEnabled() )
+    {
+    System.out.printf ("polymod : d = %llu\n", d);
+    System.out.printf ("polymod : MSB64 = %llu\n", MSB64);
+    }
   
     if (nh != 0) {
       if ((nh & MSB64) != 0)
         nh ^= d;
-    mLogger.debug ("polymod : nh = %llu\n", nh);
-
+    if( mLogger.isDebugEnabled() )
+    {
+      System.out.printf ("polymod : nh = %llu\n", nh);
+    }
       for (int i = 62; i >= 0; i--)
         if ((nh & ((/*unsigned*/ long) 1) << i) != 0) {
   	nh ^= d >> (63 - i);
   	nl ^= d << (i + 1);
-
-  	mLogger.debug ("polymod : i = %d\n", i);
-  	mLogger.debug ("polymod : shift1 = %llu\n", (d >> (63 - i)));
-  	mLogger.debug ("polymod : shift2 = %llu\n", (d << (i + 1)));
-  	mLogger.debug ("polymod : nh = %llu\n", nh);
-  	mLogger.debug ("polymod : nl = %llu\n", nl);
+    if( mLogger.isDebugEnabled() )
+    {
+  	System.out.printf ("polymod : i = %d\n", i);
+  	System.out.printf ("polymod : shift1 = %llu\n", (d >> (63 - i)));
+  	System.out.printf ("polymod : shift2 = %llu\n", (d << (i + 1)));
+  	System.out.printf ("polymod : nh = %llu\n", nh);
+  	System.out.printf ("polymod : nl = %llu\n", nl);
+    }
         }
     }
     for (int i = 63; i >= k; i--)
     {  
       if ((nl & 1 << i) != 0)
         nl ^= d >> 63 - i;
-
-      mLogger.debug ("polymod : nl = %llu\n", nl);
+    if( mLogger.isDebugEnabled() )
+    {
+      System.out.printf ("polymod : nl = %llu\n", nl);
+    }
     }
     
-    mLogger.debug ("polymod : returning %llu\n", nl);
-
+    if( mLogger.isDebugEnabled() )
+    {
+    System.out.printf ("polymod : returning %llu\n", nl);
+    }
     return nl;
   }
   
@@ -123,29 +122,37 @@ public class RabinPoly
   long[] //php, plp
   polymult (/*unsigned*/ long x, /*unsigned*/ long y)
   {
-    mLogger.debug ("polymult (x %llu y %llu)\n", x, y);
-
+    if( mLogger.isDebugEnabled() )
+    {
+    System.out.printf ("polymult (x %llu y %llu)\n", x, y);
+    }
     /*unsigned*/ long ph = 0, pl = 0;
     if ((x & 1) != 0)
       pl = y;
     for (int i = 1; i < 64; i++)
       if ((x & (1 << i)) != 0) {
-
-        mLogger.debug ("polymult : i = %d\n", i);
-        mLogger.debug ("polymult : ph = %llu\n", ph);
-        mLogger.debug ("polymult : pl = %llu\n", pl);
-        mLogger.debug ("polymult : y = %llu\n", y);
-        mLogger.debug ("polymult : ph ^ y >> (64-i) = %llu\n", (ph ^ y >> (64-i)));
-        mLogger.debug ("polymult : pl ^ y << i = %llu\n", (pl ^ y << i));
-
+    if( mLogger.isDebugEnabled() )
+    {
+        System.out.printf ("polymult : i = %d\n", i);
+        System.out.printf ("polymult : ph = %llu\n", ph);
+        System.out.printf ("polymult : pl = %llu\n", pl);
+        System.out.printf ("polymult : y = %llu\n", y);
+        System.out.printf ("polymult : ph ^ y >> (64-i) = %llu\n", (ph ^ y >> (64-i)));
+        System.out.printf ("polymult : pl ^ y << i = %llu\n", (pl ^ y << i));
+    }
         ph ^= y >> (64 - i);
         pl ^= y << i;
-
-        mLogger.debug ("polymult : ph %llu pl %llu\n", ph, pl);
+    if( mLogger.isDebugEnabled() )
+    {
+    System.out.printf ("polymult : ph %llu pl %llu\n", ph, pl);
+    }
       }
 
 
-    mLogger.debug ("polymult : h %llu l %llu\n", ph, pl);
+    if( mLogger.isDebugEnabled() )
+    {
+    System.out.printf ("polymult : h %llu l %llu\n", ph, pl);
+    }
 
     return new long[] { ph, pl };
   }
@@ -153,7 +160,10 @@ public class RabinPoly
   /*unsigned*/ long
   polymmult (/*unsigned*/ long x, /*unsigned*/ long y, /*unsigned*/ long d)
   {
-    mLogger.debug ("polymmult (x %llu y %llu d %llu)\n", x, y, d);
+    if( mLogger.isDebugEnabled() )
+    {
+    System.out.printf ("polymmult (x %llu y %llu d %llu)\n", x, y, d);
+    }
     /*unsigned*/ long h, l;
     long[] pmv = polymult (x, y);
     h = pmv[0];
@@ -177,8 +187,10 @@ public class RabinPoly
   void
   calcT ()
   {
-    mLogger.debug ("RabinPoly::calcT ()\n");
-
+    if( mLogger.isDebugEnabled() )
+    {
+    System.out.printf ("RabinPoly::calcT ()\n");
+    }
   //  assert (poly >= 0x100);
     int xshift = MostSignificantBitUtil.fls (poly) - 1;
     shift = xshift - 8;
@@ -186,19 +198,68 @@ public class RabinPoly
     for (int j = 0; j < 256; j++)
     {
       T[j] = polymmult (j, T1, poly) | ((/*unsigned*/ long) j << xshift);
-
-      mLogger.debug ("RabinPoly::calcT tmp = %llu\n", polymmult (j, T1, poly));
-      mLogger.debug ("RabinPoly::calcT shift = %llu\n", ((/*unsigned*/ long) j <<
+    if( mLogger.isDebugEnabled() )
+    {
+      System.out.printf ("RabinPoly::calcT tmp = %llu\n", polymmult (j, T1, poly));
+      System.out.printf ("RabinPoly::calcT shift = %llu\n", ((/*unsigned*/ long) j <<
   						xshift));
-      mLogger.debug ("RabinPoly::calcT xshift = %d\n", xshift);
-      mLogger.debug ("RabinPoly::calcT T[%d] = %llu\n", j, T[j]);
+      System.out.printf ("RabinPoly::calcT xshift = %d\n", xshift);
+      System.out.printf ("RabinPoly::calcT T[%d] = %llu\n", j, T[j]);
     }
-    mLogger.debug ("RabinPoly::calcT xshift = %d\n", xshift);
-    mLogger.debug ("RabinPoly::calcT T1 = %llu\n", T1);
-    mLogger.debug ("RabinPoly::calcT T = {");
+    }
+    if( mLogger.isDebugEnabled() )
+    {
+    System.out.printf ("RabinPoly::calcT xshift = %d\n", xshift);
+    System.out.printf ("RabinPoly::calcT T1 = %llu\n", T1);
+    System.out.printf ("RabinPoly::calcT T = {");
     for (int i=0; i< 256; i++)
-      mLogger.debug ("\t%llu \n", T[i]);
-    mLogger.debug ("}\n");
+      System.out.printf ("\t%llu \n", T[i]);
+    System.out.printf ("}\n");
+    }
   }
   
 }  
+  
+class RabinWindow extends RabinPoly
+{
+  public int size;
+
+  private /*unsigned*/ long fingerprint;
+  private int bufpos;
+  private /*unsigned*/ long U[] = new long[256];
+  private /*unsigned*/ byte buf[];
+  
+  // made the window size configurable
+  public RabinWindow (/*unsigned*/ long poly)
+  {
+    this(poly, DEFAULT_WINDOW_SIZE);
+  }
+
+  public RabinWindow (/*unsigned*/ long poly, /*unsigned*/ int winsz)
+  {
+    super (poly);
+    this.size = winsz;
+    this.fingerprint = 0;
+    this.bufpos = -1;
+
+    /*unsigned*/ long sizeshift = 1;
+    for (int i = 1; i < size; i++)
+      sizeshift = append8 (sizeshift, (byte)0);
+    for (int i = 0; i < 256; i++)
+      U[i] = polymmult (i, sizeshift, poly);
+    buf = new /*unsigned*/ byte[winsz];
+  }
+  
+    /*unsigned*/ long slide8 (/*unsigned*/ byte m) {
+      if (++bufpos >= size)
+        bufpos = 0;
+      /*unsigned*/ byte om = buf[bufpos];
+      buf[bufpos] = m;
+      return fingerprint = append8 (fingerprint ^ U[om], m);
+    }
+  
+    void reset () { 
+      fingerprint = 0; 
+      for(byte b : buf) { b = 0; }
+    }
+}
