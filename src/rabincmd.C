@@ -69,6 +69,12 @@ u_int64_t makeBitMask(int maskSize)
 
     FILE* is = fopen(argv[1], "r");
 
+    if( is == 0 )
+    {
+       printf("Could not open %s\n", argv[1]);
+       exit(-2);
+    }
+
     int next;
     int size = 0;
     u_int64_t val = 0;
@@ -77,6 +83,11 @@ u_int64_t makeBitMask(int maskSize)
     //break (on average) every 2^BITS bytes
     const int BITS = 12;
     u_int64_t chunkBoundaryBitMask = makeBitMask(BITS);
+
+
+    const int MAX_SIZE = 4 * (1 << BITS);
+    const int MIN_SIZE = (1 << (BITS - 4));
+
     //printf("bitmask: %16llx\n", chunkBoundaryBitMask);
     //exit(0);
 
@@ -87,7 +98,8 @@ u_int64_t makeBitMask(int maskSize)
       hash = rp.append8(hash, (char)next);
       val = rw.slide8((char)next);
 
-      if( (val & chunkBoundaryBitMask) == 0 )
+      if( ((val & chunkBoundaryBitMask) == 0 && size > MIN_SIZE) ||
+          (MAX_SIZE != -1 && size > MAX_SIZE) )
       {
           printChunkData("Found", size, val, hash);
           size = 0;
