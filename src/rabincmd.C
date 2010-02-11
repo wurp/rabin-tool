@@ -74,8 +74,9 @@ u_int64_t makeBitMask(int maskSize)
     u_int64_t val = 0;
     u_int64_t hash = 0;
 
-    //break (on average) every 2^14 bytes
-    u_int64_t chunkBoundaryBitMask = makeBitMask(14);
+    //break (on average) every 2^BITS bytes
+    const int BITS = 12;
+    u_int64_t chunkBoundaryBitMask = makeBitMask(BITS);
     //printf("bitmask: %16llx\n", chunkBoundaryBitMask);
     //exit(0);
 
