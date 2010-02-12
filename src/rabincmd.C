@@ -25,6 +25,13 @@
 #include <unistd.h>
 #include "rabinpoly.h"
 
+#include <string>
+#include <sstream>
+#include <iostream>
+#include <iomanip>
+
+using namespace std;
+
 #define INT64(n) n##LL
 #define MSB64 INT64(0x8000000000000000)
 #define FINGERPRINT_PT 0xbfe6b8a5bf378d83LL	
@@ -141,6 +148,94 @@ protected:
   }
 };
 
+string toString(u_int64_t num)
+{
+  ostringstream oss;
+  oss << setfill('0') << setw(16) << hex << num;
+  return oss.str();
+}
+
+
+//in the final form, this would inherit from ChunkProcessor
+//and another class would glob together diff types of processors as appropriate
+class CreateFileChunkProcessor : public PrintingChunkProcessor
+{
+private:
+  FILE* tmpChunkFile;
+  const char* chunkDir;
+
+protected:
+  virtual void internalProcessByte(char c)
+  {
+    PrintingChunkProcessor::internalProcessByte(c);
+    fputc(c, getTmpChunkFile());
+  }
+
+  virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
+  {
+    PrintingChunkProcessor::internalCompleteChunk(hash, fingerprint);
+    
+    string chunkName(chunkDir);
+    chunkName += toString(hash);
+    chunkName += ".rabin";
+
+    fclose(tmpChunkFile);
+    tmpChunkFile = NULL;
+
+    //if chunk already exists, just delete tmp chunk file
+    if( fileExists(chunkName.c_str()) )
+    {
+       unlink(getTmpChunkFileName().c_str());
+    }
+    //else rename tmp chunk to correct chunk name and close file
+    else
+    {
+       rename(getTmpChunkFileName().c_str(), chunkName.c_str());
+    }
+  }
+
+public:
+  CreateFileChunkProcessor()
+    : tmpChunkFile(NULL),
+      chunkDir("/home/wurp/projects/rabin/chunks/")
+  {
+  }
+
+  ~CreateFileChunkProcessor()
+  {
+    if( tmpChunkFile != NULL )
+    {
+      cerr << "Final chunk never completed!" << endl;
+      fclose(tmpChunkFile);
+      tmpChunkFile = NULL;
+    }
+  }
+
+  string getTmpChunkFileName()
+  {
+      string s(chunkDir);
+      s += "/tempChunk.rabin.tmp";
+      return s;
+  }
+
+  FILE* getTmpChunkFile()
+  {
+    if( tmpChunkFile == NULL )
+    {
+      string s = getTmpChunkFileName();
+      tmpChunkFile = fopen(s.c_str(), "w");
+
+      if( tmpChunkFile == 0 )
+      {
+         printf("Could not open %s\n", s.c_str());
+         exit(-3);
+      }
+    }
+
+    return tmpChunkFile;
+  }
+};
+
   void processChunks(FILE* is,
                      ChunkBoundaryChecker& chunkBoundaryChecker,
                      ChunkProcessor& chunkProcessor)
@@ -187,9 +282,9 @@ protected:
        exit(-2);
     }
 
-    BitwiseChunkBoundaryChecker bcbc(12);
-    PrintingChunkProcessor pcp;
-    processChunks(is, bcbc, pcp);
+    BitwiseChunkBoundaryChecker cbc(12);
+    CreateFileChunkProcessor cp;
+    processChunks(is, cbc, cp);
 
     fclose(is);
   }
