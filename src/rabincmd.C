@@ -22,14 +22,27 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include "rabinpoly.h"
 
 #define INT64(n) n##LL
 #define MSB64 INT64(0x8000000000000000)
 #define FINGERPRINT_PT 0xbfe6b8a5bf378d83LL	
 
+typedef unsigned short BOOL;
+
+//utility functions probably belong somewhere else
+
+BOOL fileExists(const char* fname)
+{
+  return access( fname, F_OK ) != -1;
+}
+
+//end utility functions
+
+
 void printChunkData(
-    char* msgPrefix,
+    const char* msgPrefix,
     int size,
     u_int64_t fingerprint,
     u_int64_t hash)
@@ -55,6 +68,109 @@ u_int64_t makeBitMask(int maskSize)
   return retval;
 }
 
+class ChunkBoundaryChecker
+{
+  public:
+  virtual BOOL isBoundary(u_int64_t fingerprint, int size) = 0;
+};
+
+class BitwiseChunkBoundaryChecker : public ChunkBoundaryChecker
+{
+  private:
+    const int BITS;
+    u_int64_t CHUNK_BOUNDARY_MASK;
+    const int MAX_SIZE;
+    const int MIN_SIZE;
+
+  public:
+  BitwiseChunkBoundaryChecker(int numBits)
+    : BITS(numBits),
+      CHUNK_BOUNDARY_MASK(makeBitMask(BITS)), 
+      MAX_SIZE(4 * (1 << BITS)),
+      MIN_SIZE(1 << (BITS - 2))
+  {
+    //printf("bitmask: %16llx\n", chunkBoundaryBitMask);
+    //exit(0);
+  }
+
+  virtual BOOL isBoundary(u_int64_t fingerprint, int size)
+  {
+      return (((fingerprint & CHUNK_BOUNDARY_MASK) == 0 && size > MIN_SIZE) ||
+              (MAX_SIZE != -1 && size > MAX_SIZE) );
+  }
+};
+
+class ChunkProcessor
+{
+private:
+  int size;
+
+protected:
+  virtual void internalProcessByte(char c) = 0;
+  virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint) = 0;
+
+public:
+  ChunkProcessor() : size(0) {}
+
+  void processByte(char c)
+  {
+     ++size;
+     internalProcessByte(c);
+  }
+
+  void completeChunk(u_int64_t hash, u_int64_t fingerprint)
+  {
+    internalCompleteChunk(hash, fingerprint);
+    size = 0;
+  }
+
+  virtual int getSize()
+  {
+    return size;
+  }
+};
+
+class PrintingChunkProcessor : public ChunkProcessor
+{
+protected:
+  virtual void internalProcessByte(char c) {}
+
+  virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
+  {
+    printChunkData("Found", getSize(), fingerprint, hash);
+  }
+};
+
+  void processChunks(FILE* is,
+                     ChunkBoundaryChecker& chunkBoundaryChecker,
+                     ChunkProcessor& chunkProcessor)
+  {
+    const u_int64_t POLY = FINGERPRINT_PT;
+    window rw(POLY);
+    rabinpoly rp(POLY);
+
+    int next;
+    u_int64_t val = 0;
+    u_int64_t hash = 0;
+
+    while((next = fgetc(is)) != -1)
+    {
+      chunkProcessor.processByte(next);
+
+      hash = rp.append8(hash, (char)next);
+      val = rw.slide8((char)next);
+
+      if( chunkBoundaryChecker.isBoundary(val, chunkProcessor.getSize()) )
+      {
+          chunkProcessor.completeChunk(hash, val);
+          hash = 0;
+          rw.reset();
+      }
+    }
+
+    chunkProcessor.completeChunk(hash, val);
+  }
+
   int main(int argc, char **argv)
   {
     if( argc < 2 )
@@ -62,10 +178,6 @@ u_int64_t makeBitMask(int maskSize)
       printf("Usage: rabin <file name>\n");
       exit(-1);
     }
-
-    const u_int64_t POLY = FINGERPRINT_PT;
-    window rw(POLY);
-    rabinpoly rp(POLY);
 
     FILE* is = fopen(argv[1], "r");
 
@@ -75,40 +187,10 @@ u_int64_t makeBitMask(int maskSize)
        exit(-2);
     }
 
-    int next;
-    int size = 0;
-    u_int64_t val = 0;
-    u_int64_t hash = 0;
-
-    //break (on average) every 2^BITS bytes
-    const int BITS = 12;
-    u_int64_t chunkBoundaryBitMask = makeBitMask(BITS);
-
-
-    const int MAX_SIZE = 4 * (1 << BITS);
-    const int MIN_SIZE = (1 << (BITS - 4));
-
-    //printf("bitmask: %16llx\n", chunkBoundaryBitMask);
-    //exit(0);
-
-    while((next = fgetc(is)) != -1)
-    {
-      ++size;
-
-      hash = rp.append8(hash, (char)next);
-      val = rw.slide8((char)next);
-
-      if( ((val & chunkBoundaryBitMask) == 0 && size > MIN_SIZE) ||
-          (MAX_SIZE != -1 && size > MAX_SIZE) )
-      {
-          printChunkData("Found", size, val, hash);
-          size = 0;
-          hash = 0;
-          rw.reset();
-      }
-    }
+    BitwiseChunkBoundaryChecker bcbc(12);
+    PrintingChunkProcessor pcp;
+    processChunks(is, bcbc, pcp);
 
     fclose(is);
-
-    printChunkData("Last ", size, val, hash);
   }
+
