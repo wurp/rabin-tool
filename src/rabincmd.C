@@ -38,6 +38,9 @@ using namespace std;
 
 typedef unsigned short BOOL;
 
+const int FALSE = 0;
+const int TRUE  = 1;
+
 //utility functions probably belong somewhere else
 
 BOOL fileExists(const char* fname)
@@ -54,7 +57,7 @@ void printChunkData(
     u_int64_t fingerprint,
     u_int64_t hash)
 {
-  printf("%s chunk hash: %16llx fingerprint: %16llx length: %d\n",
+  printf("%s chunk hash: %016llx fingerprint: %016llx length: %d\n",
          msgPrefix,
          hash,
          fingerprint,
@@ -137,17 +140,6 @@ public:
   }
 };
 
-class PrintingChunkProcessor : public ChunkProcessor
-{
-protected:
-  virtual void internalProcessByte(char c) {}
-
-  virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
-  {
-    printChunkData("Found", getSize(), fingerprint, hash);
-  }
-};
-
 string toString(u_int64_t num)
 {
   ostringstream oss;
@@ -158,24 +150,26 @@ string toString(u_int64_t num)
 
 //in the final form, this would inherit from ChunkProcessor
 //and another class would glob together diff types of processors as appropriate
-class CreateFileChunkProcessor : public PrintingChunkProcessor
+class CreateFileChunkProcessor : public ChunkProcessor
 {
 private:
-  FILE* tmpChunkFile;
-  const char* chunkDir;
-
+  string      chunkDir;
+  BOOL        writeChunks;
+  BOOL        print;
+  FILE*       tmpChunkFile;
 protected:
   virtual void internalProcessByte(char c)
   {
-    PrintingChunkProcessor::internalProcessByte(c);
-    fputc(c, getTmpChunkFile());
+    if( writeChunks ) fputc(c, getTmpChunkFile());
   }
 
   virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
   {
-    PrintingChunkProcessor::internalCompleteChunk(hash, fingerprint);
-    
+    if( print ) printChunkData("Found", getSize(), fingerprint, hash);
+    if( !writeChunks ) return;
+
     string chunkName(chunkDir);
+    chunkName += "/";
     chunkName += toString(hash);
     chunkName += ".rabin";
 
@@ -195,9 +189,11 @@ protected:
   }
 
 public:
-  CreateFileChunkProcessor()
+  CreateFileChunkProcessor(BOOL print, string chunkDir)
     : tmpChunkFile(NULL),
-      chunkDir("/home/wurp/projects/rabin/chunks/")
+      chunkDir(chunkDir),
+      print(print),
+      writeChunks(chunkDir != "")
   {
   }
 
@@ -266,24 +262,151 @@ public:
     chunkProcessor.completeChunk(hash, val);
   }
 
-  int main(int argc, char **argv)
+class Options
+{
+public:
+  string filename;
+  string chunkDir;
+  string outFilename;
+  string inFilename;
+  BOOL   compress;
+  BOOL   extract;
+  BOOL   print;
+  BOOL   reconstruct;
+
+  Options(int argc, char** argv)
+    : compress   (FALSE),
+      extract    (FALSE),
+      print      (FALSE),
+      reconstruct(FALSE)
   {
-    if( argc < 2 )
+    setOptionsFromArguments(argc, argv);
+    validateOptionCombination();
+  }
+
+  void usage()
+  {
+    fprintf(stderr, "Flags:\n");
+    fprintf(stderr, "-d <directory in which to put/retrieve chunks>\n");
+    fprintf(stderr, "-p \"print chunk data for the file\" (to standard out)\n");
+    fprintf(stderr, "-c \"rabin enCode/Compress file\" (to standard out or outfile)\n");
+    fprintf(stderr, "-x \"rabin eXtract/decompress file\" (to standard out or outfile)\n");
+    fprintf(stderr, "-r \"reconstruct file from chunk dir and printed chunk data\" (to standard out or outfile)\n");
+    fprintf(stderr, "-o <file in which to put output>\n");
+
+    fprintf(stderr, "\nFlags c, x and r are mutually exclusive.  Flag p is incompatible\n");
+    fprintf(stderr, "with r.  p is incompatible with x and c unless -o is also given.\n");
+  }
+
+  void setOptionsFromArguments(int argc, char** argv)
+  {
+    int c;
+    extern char *optarg;
+    extern int optind, optopt;
+
+    while ((c = getopt(argc, argv, ":cxprd:o:")) != -1) {
+      switch(c) {
+      case 'c':
+          compress = TRUE;
+          break;
+      case 'x':
+          extract = TRUE;
+          break;
+      case 'p':
+          print = TRUE;
+          break;
+      case 'r':
+          reconstruct = TRUE;
+          break;
+      case 'd':
+          chunkDir = optarg;
+          break;
+      case 'o':
+          outFilename = optarg;
+          break;
+      case ':':       /* -d or -o without operand */
+          fprintf(stderr,
+                  "Option -%c requires an operand\n", optopt);
+          exit(-1);
+          break;
+      case '?':
+          usage();
+          exit(-1);
+      }
+    }
+
+    if( optind != argc - 1 )
     {
-      printf("Usage: rabin <file name>\n");
+      fprintf(stderr, "Expected exactly one input file specified.\n");
       exit(-1);
     }
 
-    FILE* is = fopen(argv[1], "r");
+    inFilename = argv[optind];
+  }
+
+  void validateOptionCombination()
+  {
+    //-d is compatible with any flag
+   
+    if( print )
+    {
+      //print is incompatible with reconstruct
+      if( reconstruct )
+      {
+        fprintf(stderr, "-p (print) flag makes no sense with -r (reconstruct) flag\n");
+        exit(-1);
+      }
+
+      //print is incompatible with extract and compress unless outFilename
+      //is also given.
+      if( (extract || compress) && outFilename == "" )
+      {
+        fprintf(stderr, "-p (print) flag combined with -c (compress) or -x (extract) requires\n-o (output file name) where compress/extract output goes.\n");
+        exit(-1);
+      }
+    }
+
+    if( compress )
+    {
+      //compress and extract are mutually exclusive
+      if( extract )
+      {
+        fprintf(stderr, "-c (compress) flag cannot be combined with -x (extract)\n");
+        exit(-1);
+      }
+
+      //compress and reconstruct are mutually exclusive
+      if( reconstruct )
+      {
+        fprintf(stderr, "-c (compress) flag cannot be combined with -r (reconstruct)\n");
+        exit(-1);
+      }
+    }
+
+    if( reconstruct && (chunkDir == "") )
+    {
+      fprintf(stderr, "-r (reconstruct) requires -d (chunk directory) to be specified\n");
+      exit(-1);
+    }
+  }
+};
+
+
+
+  int main(int argc, char **argv)
+  {
+    Options opts(argc, argv);
+
+    FILE* is = fopen(opts.inFilename.c_str(), "r");
 
     if( is == 0 )
     {
-       printf("Could not open %s\n", argv[1]);
+       printf("Could not open %s\n", opts.inFilename.c_str());
        exit(-2);
     }
 
     BitwiseChunkBoundaryChecker cbc(12);
-    CreateFileChunkProcessor cp;
+    CreateFileChunkProcessor cp(opts.print, opts.chunkDir);
     processChunks(is, cbc, cp);
 
     fclose(is);
