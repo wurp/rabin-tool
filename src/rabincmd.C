@@ -262,6 +262,32 @@ public:
     chunkProcessor.completeChunk(hash, val);
   }
 
+int requireInt(char* str)
+{
+  char* str_orig = str;
+
+
+  //skip whitespace
+  while(str[0] == ' ' || str[0] == '\t') ++str;
+
+  //validate
+  int i = 0;
+  while(str[i] != 0)
+  {
+    int digit = str[i] - '0';
+    if( digit < 0 || digit > 9 )
+    {
+      fprintf(stderr, "%s is not a number\n", str_orig);
+      exit(-1);
+    }
+
+    ++i;
+  }
+
+
+  return atoi(str);
+}
+
 class Options
 {
 public:
@@ -273,12 +299,14 @@ public:
   BOOL   extract;
   BOOL   print;
   BOOL   reconstruct;
+  int    bits;
 
   Options(int argc, char** argv)
     : compress   (FALSE),
       extract    (FALSE),
       print      (FALSE),
-      reconstruct(FALSE)
+      reconstruct(FALSE),
+      bits       (12)
   {
     setOptionsFromArguments(argc, argv);
     validateOptionCombination();
@@ -287,6 +315,7 @@ public:
   void usage()
   {
     fprintf(stderr, "Flags:\n");
+    fprintf(stderr, "-b <log2 of the average chunk length desired, default is 12>\n");
     fprintf(stderr, "-d <directory in which to put/retrieve chunks>\n");
     fprintf(stderr, "-p \"print chunk data for the file\" (to standard out)\n");
     fprintf(stderr, "-c \"rabin enCode/Compress file\" (to standard out or outfile)\n");
@@ -298,31 +327,44 @@ public:
     fprintf(stderr, "with r.  p is incompatible with x and c unless -o is also given.\n");
   }
 
+  void unsupported(string s)
+  {
+    fprintf(stderr, "%s not yet supported\n", s.c_str());
+    exit(-1);
+  }
+
   void setOptionsFromArguments(int argc, char** argv)
   {
     int c;
     extern char *optarg;
     extern int optind, optopt;
 
-    while ((c = getopt(argc, argv, ":cxprd:o:")) != -1) {
+    while ((c = getopt(argc, argv, ":cxprd:o:b:")) != -1) {
       switch(c) {
       case 'c':
+unsupported("-c");
           compress = TRUE;
           break;
       case 'x':
+unsupported("-x");
           extract = TRUE;
           break;
       case 'p':
           print = TRUE;
           break;
       case 'r':
+unsupported("-r");
           reconstruct = TRUE;
           break;
       case 'd':
           chunkDir = optarg;
           break;
       case 'o':
+unsupported("-o");
           outFilename = optarg;
+          break;
+      case 'b':
+          bits = requireInt(optarg);
           break;
       case ':':       /* -d or -o without operand */
           fprintf(stderr,
@@ -405,7 +447,7 @@ public:
        exit(-2);
     }
 
-    BitwiseChunkBoundaryChecker cbc(12);
+    BitwiseChunkBoundaryChecker cbc(opts.bits);
     CreateFileChunkProcessor cp(opts.print, opts.chunkDir);
     processChunks(is, cbc, cp);
 
