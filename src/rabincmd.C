@@ -123,7 +123,7 @@ private:
 
 //protected:
 public:
-  virtual void internalProcessByte(char c)
+  virtual void internalProcessByte(unsigned char c)
   {
      ++size;
 //printf("processed byte %d\n", getSize());
@@ -137,7 +137,7 @@ public:
 public:
   ChunkProcessor() : size(0) {}
 
-  void processByte(char c) 
+  void processByte(unsigned char c) 
   {
      internalProcessByte(c);
   }
@@ -183,7 +183,7 @@ private:
   string      chunkDir;
   FILE*       tmpChunkFile;
 protected:
-  virtual void internalProcessByte(char c)
+  virtual void internalProcessByte(unsigned char c)
   {
     ChunkProcessor::internalProcessByte(c);
     fputc(c, getTmpChunkFile());
@@ -260,11 +260,12 @@ class CompressChunkProcessor : public ChunkProcessor
 private:
   FILE*   outfile;
   int     maxChunkSize;
-  char*   buffer;
+  unsigned char*   buffer;
   long    fileLoc;
+  long    chunkNum;
   map<u_int64_t, long> chunkLocations;
 protected:
-  virtual void internalProcessByte(char c)
+  virtual void internalProcessByte(unsigned char c)
   {
     if( getSize() < maxChunkSize)
     {
@@ -294,8 +295,14 @@ protected:
       //otherwise if it hasn't been written out, mark it as an in-place chunk & record its location for future reference
       if( chunkIter == chunkLocations.end() )
       {
-        char flag = 0;
-        fwrite(&flag, 1, 1, outfile);
+        //if the first byte is 0xfe, it would be ambiguous if that's in-place
+        //data or a chunk loc.  So we use 0xff as an 'escape' character.
+        if( buffer[0] == 0xff || buffer[0] == 0xfe )
+        {
+          unsigned char flag = 0xff;
+          fwrite(&flag, 1, 1, outfile);
+        }
+
         fwrite(buffer, 1, getSize(), outfile);
 
         chunkLocations[hash] = fileLoc - getSize();
@@ -303,21 +310,38 @@ protected:
       //otherwise mark this as an already found chunk & write the location
       else
       {
-        char flag = 1;
+        unsigned char flag = 0xfe;
         fwrite(&flag, 1, 1, outfile);
         long chunkLoc = chunkIter->second;
-        fwrite(&chunkLoc, sizeof(long), 1, outfile);
+
+        //To accomodate varying sizes of indexes without always using
+        //4 bytes, we just store 7 bits of the number in each byte.  Then the
+        //high bit is set to 0 for all leading bytes, and set to 1 in the
+        //last byte as a terminator.  So chunkNums < 128 use only one byte,
+        //chunkNums < 16384 use two bytes, etc.
+        //(Num required bytes = ceil(log2(chunkNum)/7)
+        unsigned char b;
+        while(chunkLoc >= 127)
+        {
+          b = chunkLoc & 0x7f;  //grab the low 7 bits
+          chunkLoc >>= 7;       //shift them out
+          fwrite(&b, sizeof(b), 1, outfile); //write them to the file
+        }
+
+        b = chunkLoc | 0x80;
+        fwrite(&b, sizeof(b), 1, outfile);
       }
     }
 
     ChunkProcessor::internalCompleteChunk(hash, fingerprint);
+    ++chunkNum;
   }
 
 public:
   CompressChunkProcessor(FILE* outfile, int maxChunkSize)
     : outfile(outfile),
       maxChunkSize(maxChunkSize),
-      buffer(new char[maxChunkSize]),
+      buffer(new unsigned char[maxChunkSize]),
       fileLoc(0)
   {
   }
@@ -447,21 +471,21 @@ public:
           compress = TRUE;
           break;
       case 'x':
-unsupported("-x");
+unsupported("-x TODO");
           extract = TRUE;
           break;
       case 'p':
           print = TRUE;
           break;
       case 'r':
-unsupported("-r");
+unsupported("-r TODO");
           reconstruct = TRUE;
           break;
       case 'd':
           chunkDir = optarg;
           break;
       case 'o':
-unsupported("-o");
+unsupported("-o TODO");
           outFilename = optarg;
           break;
       case 'b':
@@ -540,7 +564,7 @@ private:
   vector<ChunkProcessor*> processors;
 
 protected:
-  virtual void internalProcessByte(char c)
+  virtual void internalProcessByte(unsigned char c)
   {
     ChunkProcessor::internalProcessByte(c);
     for(vector<ChunkProcessor*>::iterator procIter = processors.begin();
