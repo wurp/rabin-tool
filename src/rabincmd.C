@@ -246,7 +246,7 @@ public:
 
       if( tmpChunkFile == 0 )
       {
-         printf("Could not open %s\n", s.c_str());
+         fprintf(stderr, "Could not open %s\n", s.c_str());
          exit(-3);
       }
     }
@@ -297,6 +297,8 @@ protected:
         char flag = 0;
         fwrite(&flag, 1, 1, outfile);
         fwrite(buffer, 1, getSize(), outfile);
+
+        chunkLocations[hash] = fileLoc - getSize();
       }
       //otherwise mark this as an already found chunk & write the location
       else
