@@ -261,7 +261,6 @@ private:
   FILE*   outfile;
   int     maxChunkSize;
   unsigned char*   buffer;
-  long    fileLoc;
   long    chunkNum;
   map<u_int64_t, long> chunkLocations;
 protected:
@@ -277,7 +276,6 @@ protected:
     }
 
     ChunkProcessor::internalProcessByte(c);
-    ++fileLoc;
   }
 
   virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
@@ -286,7 +284,9 @@ protected:
     if( chunkLocations.size() == 0 )
     {
       fwrite(buffer, 1, getSize(), outfile);
-      chunkLocations[hash] = fileLoc;
+      chunkLocations[hash] = chunkNum;
+fprintf(stderr, "Wrote first chunk %ld\n", chunkNum);
+      ++chunkNum;
     }
     else
     {
@@ -301,11 +301,14 @@ protected:
         {
           unsigned char flag = 0xff;
           fwrite(&flag, 1, 1, outfile);
+fprintf(stderr, "Wrote 0xff\n");
         }
 
         fwrite(buffer, 1, getSize(), outfile);
 
-        chunkLocations[hash] = fileLoc - getSize();
+        chunkLocations[hash] = chunkNum;
+fprintf(stderr, "Wrote chunk %ld\n", chunkNum);
+        ++chunkNum;
       }
       //otherwise mark this as an already found chunk & write the location
       else
@@ -313,6 +316,7 @@ protected:
         unsigned char flag = 0xfe;
         fwrite(&flag, 1, 1, outfile);
         long chunkLoc = chunkIter->second;
+fprintf(stderr, "Wrote chunk %ld again\n", chunkLoc);
 
         //To accomodate varying sizes of indexes without always using
         //4 bytes, we just store 7 bits of the number in each byte.  Then the
@@ -325,16 +329,17 @@ protected:
         {
           b = chunkLoc & 0x7f;  //grab the low 7 bits
           chunkLoc >>= 7;       //shift them out
+fprintf(stderr, "Wrote %d to file\n", b);
           fwrite(&b, sizeof(b), 1, outfile); //write them to the file
         }
 
         b = chunkLoc | 0x80;
         fwrite(&b, sizeof(b), 1, outfile);
+fprintf(stderr, "Wrote final %d to file\n", b);
       }
     }
 
     ChunkProcessor::internalCompleteChunk(hash, fingerprint);
-    ++chunkNum;
   }
 
 public:
@@ -342,7 +347,7 @@ public:
     : outfile(outfile),
       maxChunkSize(maxChunkSize),
       buffer(new unsigned char[maxChunkSize]),
-      fileLoc(0)
+      chunkNum(0)
   {
   }
 
@@ -358,7 +363,220 @@ public:
   }
 };
 
-void processChunks(FILE* is,
+class DataSource
+{
+public:
+  virtual int getByte() = 0;
+};
+
+class RawFileDataSource : public DataSource
+{
+private:
+  FILE* is;
+public:
+  RawFileDataSource(FILE* is) : is(is) {}
+  ~RawFileDataSource()
+  {
+    fclose(is);
+  }
+
+  virtual int getByte()
+  {
+    return fgetc(is);
+  }
+};
+
+class ExtractDataSource : public DataSource
+{
+private:
+  FILE*  raf;
+  FILE*  infile;
+  FILE*  currReadFile;
+  BOOL   inPlaceChunk;
+  fpos_t storedLoc;
+public:
+  ExtractDataSource(const char* outfileName, FILE* infile)
+    : raf(NULL),
+      inPlaceChunk(TRUE),
+      infile(infile),
+      currReadFile(infile)
+  {
+    raf = fopen(outfileName, "wb+");
+
+    if( raf == 0 )
+    {
+       printf("Could not open %s for read/write\n", outfileName);
+       exit(-2);
+    }
+  }
+
+  void restoreLocation()
+  {
+    fsetpos(raf, &storedLoc);
+    currReadFile = infile;
+  }
+
+  void write(void* buffer, int size)
+  {
+    //if( storedLoc <- check for 0, to indicate that we don't have a storedLoc
+    fwrite(buffer, 1, size, raf);
+  }
+
+  void readExistingChunk(fpos_t loc)
+  {
+    fgetpos(raf, &storedLoc);
+    fsetpos(raf, &loc);
+
+    currReadFile = raf;
+
+    inPlaceChunk = FALSE;
+  }
+
+  void startInPlaceChunk(fpos_t* currChunkBegin)
+  {
+    inPlaceChunk = TRUE;
+    fgetpos(raf, currChunkBegin);
+    currReadFile = infile;
+  }
+
+  void close()
+  {
+    fclose(raf);
+    raf = NULL;
+  }
+
+  BOOL isInPlaceChunk() { return inPlaceChunk; }
+
+  virtual int peekByte()
+  {
+    fpos_t tmp;
+    fgetpos(currReadFile, &tmp);
+    int retval = fgetc(currReadFile);
+    fsetpos(currReadFile, &tmp);
+
+    return retval;
+  }
+
+  virtual int getByte()
+  {
+    return fgetc(currReadFile);
+  }
+};
+
+class ExtractChunkProcessor : public ChunkProcessor
+{
+private:
+  int                maxChunkSize;
+  unsigned char*     buffer;
+  fpos_t             currChunkBegin;
+  ExtractDataSource* eds;
+  vector<fpos_t>     chunkLocations;
+protected:
+  virtual void internalProcessByte(unsigned char c)
+  {
+    if( getSize() < maxChunkSize)
+    {
+      buffer[getSize()] = c;
+    }
+    else
+    {
+      fprintf(stderr, "Extraction buffer overflow, size = %d\n", getSize());
+    }
+
+    ChunkProcessor::internalProcessByte(c);
+  }
+
+  virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
+  {
+    if( eds->isInPlaceChunk() )
+    {
+      //store the index of this chunk
+      chunkLocations.push_back(currChunkBegin);
+    }
+    else
+    {
+      eds->restoreLocation();
+    }
+
+    //write the chunk we just processed
+    eds->write(buffer, getSize());
+
+    //see how to handle what comes next in the input file
+    int tmpGet = eds->peekByte();
+    if( tmpGet != -1 )
+    {
+      unsigned char nextByte = tmpGet;
+
+      //this is a chunk we already processed; find it
+      if( nextByte == 0xfe )
+      {
+        eds->getByte();
+
+        long chunkNum = 0;
+
+        unsigned char b = 0;
+        int i = 0;
+        do
+        {
+          b = eds->getByte();
+  //fprintf(stderr, "Read %d from file\n", b);
+
+          //get lower 7 bits of b
+          long tmp = b & 0x7f;
+          //shift it to where it goes in chunkNum (least significant byte is first)
+          tmp <<= (7 * i);
+          chunkNum |= tmp;
+
+          ++i;
+        }
+        while( (b & 0x80) == 0 );
+
+  fprintf(stderr, "Reading chunk %ld again\n", chunkNum);
+        //now I know the chunkNum; find it in the output file & copy over the chunk
+        //eds will remember where the end of the file is for later restore
+        eds->readExistingChunk(chunkLocations[chunkNum]);
+      }
+      else
+      {
+  fprintf(stderr, "Reading in-place chunk %ld\n", chunkLocations.size());
+        //0xff indicates another in-place chunk but is an escape character; eat it
+        //see CompressChunkProcessor.internalCompleteChunk
+        if( nextByte == 0xff )
+        {
+  fprintf(stderr, "Eating 0xff\n");
+          eds->getByte();
+        }
+        //any other character indicates an in-place chunk as well
+
+        //store the position of the next chunk
+        eds->startInPlaceChunk(&currChunkBegin);
+      }
+
+      ChunkProcessor::internalCompleteChunk(hash, fingerprint);
+    }
+  }
+
+public:
+  ExtractChunkProcessor(int maxChunkSize, ExtractDataSource* dataSource)
+    : maxChunkSize(maxChunkSize),
+      buffer(new unsigned char[maxChunkSize]),
+      eds(dataSource)
+  {
+    eds->startInPlaceChunk(&currChunkBegin);
+fprintf(stderr, "Reading in-place chunk %ld\n", chunkLocations.size());
+  }
+
+  ~ExtractChunkProcessor()
+  {
+    eds->close();
+
+    delete[] buffer;
+  }
+
+  ExtractDataSource* getDataSource() { return eds; }
+};
+
+void processChunks(DataSource* ds,
                    ChunkBoundaryChecker& chunkBoundaryChecker,
                    ChunkProcessor& chunkProcessor)
 {
@@ -370,7 +588,7 @@ void processChunks(FILE* is,
   u_int64_t val = 0;
   u_int64_t hash = 0;
 
-  while((next = fgetc(is)) != -1)
+  while((next = ds->getByte()) != -1)
   {
     chunkProcessor.processByte(next);
 
@@ -471,7 +689,6 @@ public:
           compress = TRUE;
           break;
       case 'x':
-unsupported("-x TODO");
           extract = TRUE;
           break;
       case 'p':
@@ -485,7 +702,6 @@ unsupported("-r TODO");
           chunkDir = optarg;
           break;
       case 'o':
-unsupported("-o TODO");
           outFilename = optarg;
           break;
       case 'b':
@@ -514,7 +730,7 @@ unsupported("-o TODO");
   void validateOptionCombination()
   {
     //-d is compatible with any flag
-   
+
     if( print )
     {
       //print is incompatible with reconstruct
@@ -550,6 +766,15 @@ unsupported("-o TODO");
       }
     }
 
+    if( extract )
+    {
+      if( outFilename == "" )
+      {
+        fprintf(stderr, "-x (extract) flag requires -o (can't use stdout since we need to be able to retrieve chunks from earlier in the output file)\n");
+        exit(-1);
+      }
+    }
+
     if( reconstruct && (chunkDir == "") )
     {
       fprintf(stderr, "-r (reconstruct) requires -d (chunk directory) to be specified\n");
@@ -562,6 +787,7 @@ class OptionsChunkProcessor : public ChunkProcessor
 {
 private:
   vector<ChunkProcessor*> processors;
+  DataSource*             dataSource;
 
 protected:
   virtual void internalProcessByte(unsigned char c)
@@ -588,7 +814,16 @@ protected:
 
 public:
   OptionsChunkProcessor(Options opts, int maxChunkSize)
+    : dataSource(NULL)
   {
+    FILE* is = fopen(opts.inFilename.c_str(), "r");
+
+    if( is == 0 )
+    {
+       printf("Could not open %s\n", opts.inFilename.c_str());
+       exit(-2);
+    }
+
     //build list of processors
     if( opts.print ) processors.push_back(new PrintChunkProcessor());
 
@@ -599,7 +834,31 @@ public:
 
     if( opts.compress )
     {
-      processors.push_back(new CompressChunkProcessor(stdout, maxChunkSize));
+      FILE* out = stdout;
+      if( opts.outFilename != "" )
+      {
+        out = fopen(opts.outFilename.c_str(), "w");
+
+        if( out == NULL )
+        {
+          fprintf(stderr, "Couldn't open %s\n", opts.outFilename.c_str());
+          exit(-2);
+        }
+      }
+
+      processors.push_back(new CompressChunkProcessor(out, maxChunkSize));
+    }
+
+    if( opts.extract )
+    {
+      dataSource = new ExtractDataSource(opts.outFilename.c_str(), is);
+      ExtractChunkProcessor* extractProc = new ExtractChunkProcessor(maxChunkSize, (ExtractDataSource*)dataSource);
+      processors.push_back(extractProc);
+    }
+
+    if( dataSource == NULL )
+    {
+      dataSource = new RawFileDataSource(is);
     }
   }
 
@@ -611,6 +870,13 @@ public:
     {
       delete *procIter;
     }
+
+    delete dataSource;
+  }
+
+  DataSource* getDataSource()
+  {
+    return dataSource;
   }
 };
 
@@ -620,18 +886,8 @@ public:
   {
     Options opts(argc, argv);
 
-    FILE* is = fopen(opts.inFilename.c_str(), "r");
-
-    if( is == 0 )
-    {
-       printf("Could not open %s\n", opts.inFilename.c_str());
-       exit(-2);
-    }
-
     BitwiseChunkBoundaryChecker cbc(opts.bits);
     OptionsChunkProcessor cp(opts, cbc.getMaxChunkSize());
-    processChunks(is, cbc, cp);
-
-    fclose(is);
+    processChunks(cp.getDataSource(), cbc, cp);
   }
 
