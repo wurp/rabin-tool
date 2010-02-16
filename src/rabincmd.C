@@ -29,6 +29,9 @@
 #include <sstream>
 #include <iostream>
 #include <iomanip>
+#include <vector>
+#include <map>
+#include <iterator>
 
 using namespace std;
 
@@ -105,9 +108,12 @@ class BitwiseChunkBoundaryChecker : public ChunkBoundaryChecker
 
   virtual BOOL isBoundary(u_int64_t fingerprint, int size)
   {
-      return (((fingerprint & CHUNK_BOUNDARY_MASK) == 0 && size > MIN_SIZE) ||
-              (MAX_SIZE != -1 && size > MAX_SIZE) );
+      return (((fingerprint & CHUNK_BOUNDARY_MASK) == 0 && size >= MIN_SIZE) ||
+              (MAX_SIZE != -1 && size >= MAX_SIZE) );
   }
+
+  int getMaxChunkSize() { return MAX_SIZE; }
+
 };
 
 class ChunkProcessor
@@ -115,23 +121,30 @@ class ChunkProcessor
 private:
   int size;
 
-protected:
-  virtual void internalProcessByte(char c) = 0;
-  virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint) = 0;
+//protected:
+public:
+  virtual void internalProcessByte(char c)
+  {
+     ++size;
+//printf("processed byte %d\n", getSize());
+  }
+
+  virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
+  {
+    size = 0;
+  }
 
 public:
   ChunkProcessor() : size(0) {}
 
-  void processByte(char c)
+  void processByte(char c) 
   {
-     ++size;
      internalProcessByte(c);
   }
 
   void completeChunk(u_int64_t hash, u_int64_t fingerprint)
   {
     internalCompleteChunk(hash, fingerprint);
-    size = 0;
   }
 
   virtual int getSize()
@@ -148,25 +161,37 @@ string toString(u_int64_t num)
 }
 
 
-//in the final form, this would inherit from ChunkProcessor
-//and another class would glob together diff types of processors as appropriate
+class PrintChunkProcessor : public ChunkProcessor
+{
+private:
+protected:
+  virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
+  {
+    printChunkData("Found", getSize(), fingerprint, hash);
+    ChunkProcessor::internalCompleteChunk(hash, fingerprint);
+  }
+
+public:
+  PrintChunkProcessor()
+  {
+  }
+};
+
 class CreateFileChunkProcessor : public ChunkProcessor
 {
 private:
   string      chunkDir;
-  BOOL        writeChunks;
-  BOOL        print;
   FILE*       tmpChunkFile;
 protected:
   virtual void internalProcessByte(char c)
   {
-    if( writeChunks ) fputc(c, getTmpChunkFile());
+    ChunkProcessor::internalProcessByte(c);
+    fputc(c, getTmpChunkFile());
   }
 
   virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
   {
-    if( print ) printChunkData("Found", getSize(), fingerprint, hash);
-    if( !writeChunks ) return;
+    ChunkProcessor::internalCompleteChunk(hash, fingerprint);
 
     string chunkName(chunkDir);
     chunkName += "/";
@@ -189,11 +214,9 @@ protected:
   }
 
 public:
-  CreateFileChunkProcessor(BOOL print, string chunkDir)
+  CreateFileChunkProcessor(string chunkDir)
     : tmpChunkFile(NULL),
-      chunkDir(chunkDir),
-      print(print),
-      writeChunks(chunkDir != "")
+      chunkDir(chunkDir)
   {
   }
 
@@ -232,35 +255,112 @@ public:
   }
 };
 
-  void processChunks(FILE* is,
-                     ChunkBoundaryChecker& chunkBoundaryChecker,
-                     ChunkProcessor& chunkProcessor)
+class CompressChunkProcessor : public ChunkProcessor
+{
+private:
+  FILE*   outfile;
+  int     maxChunkSize;
+  char*   buffer;
+  long    fileLoc;
+  map<u_int64_t, long> chunkLocations;
+protected:
+  virtual void internalProcessByte(char c)
   {
-    const u_int64_t POLY = FINGERPRINT_PT;
-    window rw(POLY);
-    rabinpoly rp(POLY);
-
-    int next;
-    u_int64_t val = 0;
-    u_int64_t hash = 0;
-
-    while((next = fgetc(is)) != -1)
+    if( getSize() < maxChunkSize)
     {
-      chunkProcessor.processByte(next);
+      buffer[getSize()] = c;
+    }
+    else
+    {
+      fprintf(stderr, "Compression buffer overflow, size = %d\n", getSize());
+    }
 
-      hash = rp.append8(hash, (char)next);
-      val = rw.slide8((char)next);
+    ChunkProcessor::internalProcessByte(c);
+    ++fileLoc;
+  }
 
-      if( chunkBoundaryChecker.isBoundary(val, chunkProcessor.getSize()) )
+  virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
+  {
+    //if this is the very first chunk, just write it out
+    if( chunkLocations.size() == 0 )
+    {
+      fwrite(buffer, 1, getSize(), outfile);
+      chunkLocations[hash] = fileLoc;
+    }
+    else
+    {
+      map<u_int64_t, long>::iterator chunkIter = chunkLocations.find(hash);
+
+      //otherwise if it hasn't been written out, mark it as an in-place chunk & record its location for future reference
+      if( chunkIter == chunkLocations.end() )
       {
-          chunkProcessor.completeChunk(hash, val);
-          hash = 0;
-          rw.reset();
+        char flag = 0;
+        fwrite(&flag, 1, 1, outfile);
+        fwrite(buffer, 1, getSize(), outfile);
+      }
+      //otherwise mark this as an already found chunk & write the location
+      else
+      {
+        char flag = 1;
+        fwrite(&flag, 1, 1, outfile);
+        long chunkLoc = chunkIter->second;
+        fwrite(&chunkLoc, sizeof(long), 1, outfile);
       }
     }
 
-    chunkProcessor.completeChunk(hash, val);
+    ChunkProcessor::internalCompleteChunk(hash, fingerprint);
   }
+
+public:
+  CompressChunkProcessor(FILE* outfile, int maxChunkSize)
+    : outfile(outfile),
+      maxChunkSize(maxChunkSize),
+      buffer(new char[maxChunkSize]),
+      fileLoc(0)
+  {
+  }
+
+  ~CompressChunkProcessor()
+  {
+    if( outfile != stdout )
+    {
+      fclose(outfile);
+      outfile = NULL;
+    }
+
+    delete[] buffer;
+  }
+};
+
+void processChunks(FILE* is,
+                   ChunkBoundaryChecker& chunkBoundaryChecker,
+                   ChunkProcessor& chunkProcessor)
+{
+  const u_int64_t POLY = FINGERPRINT_PT;
+  window rw(POLY);
+  rabinpoly rp(POLY);
+
+  int next;
+  u_int64_t val = 0;
+  u_int64_t hash = 0;
+
+  while((next = fgetc(is)) != -1)
+  {
+    chunkProcessor.processByte(next);
+
+    hash = rp.append8(hash, (char)next);
+    val = rw.slide8((char)next);
+
+    if( chunkBoundaryChecker.isBoundary(val, chunkProcessor.getSize()) )
+    {
+        chunkProcessor.completeChunk(hash, val);
+        hash = 0;
+        rw.reset();
+    }
+  }
+
+  chunkProcessor.completeChunk(hash, val);
+}
 
 int requireInt(char* str)
 {
@@ -342,7 +442,6 @@ public:
     while ((c = getopt(argc, argv, ":cxprd:o:b:")) != -1) {
       switch(c) {
       case 'c':
-unsupported("-c");
           compress = TRUE;
           break;
       case 'x':
@@ -433,6 +532,62 @@ unsupported("-o");
   }
 };
 
+class OptionsChunkProcessor : public ChunkProcessor
+{
+private:
+  vector<ChunkProcessor*> processors;
+
+protected:
+  virtual void internalProcessByte(char c)
+  {
+    ChunkProcessor::internalProcessByte(c);
+    for(vector<ChunkProcessor*>::iterator procIter = processors.begin();
+        procIter != processors.end();
+        ++procIter)
+    {
+      (*procIter)->internalProcessByte(c);
+    }
+  }
+
+  virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
+  {
+    ChunkProcessor::internalCompleteChunk(hash, fingerprint);
+    for(vector<ChunkProcessor*>::iterator procIter = processors.begin();
+        procIter != processors.end();
+        ++procIter)
+    {
+      (*procIter)->internalCompleteChunk(hash, fingerprint);
+    }
+  }
+
+public:
+  OptionsChunkProcessor(Options opts, int maxChunkSize)
+  {
+    //build list of processors
+    if( opts.print ) processors.push_back(new PrintChunkProcessor());
+
+    if( opts.chunkDir != "" )
+    {
+      processors.push_back(new CreateFileChunkProcessor(opts.chunkDir));
+    }
+
+    if( opts.compress )
+    {
+      processors.push_back(new CompressChunkProcessor(stdout, maxChunkSize));
+    }
+  }
+
+  ~OptionsChunkProcessor()
+  {
+    for(vector<ChunkProcessor*>::iterator procIter = processors.begin();
+        procIter != processors.end();
+        ++procIter)
+    {
+      delete *procIter;
+    }
+  }
+};
+
 
 
   int main(int argc, char **argv)
@@ -448,7 +603,7 @@ unsupported("-o");
     }
 
     BitwiseChunkBoundaryChecker cbc(opts.bits);
-    CreateFileChunkProcessor cp(opts.print, opts.chunkDir);
+    OptionsChunkProcessor cp(opts, cbc.getMaxChunkSize());
     processChunks(is, cbc, cp);
 
     fclose(is);
