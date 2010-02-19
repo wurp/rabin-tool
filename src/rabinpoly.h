@@ -25,6 +25,7 @@
 #define _RABINPOLY_H_ 1
 
 #include <sys/types.h>
+#include <stdio.h>
 #include <string.h>
 
 #define DEFAULT_WINDOW_SIZE 16
@@ -45,7 +46,17 @@ public:
 
   explicit rabinpoly (u_int64_t poly);
   u_int64_t append8 (u_int64_t p, u_char m) const
-    { return ((p << 8) | m) ^ T[p >> shift]; }
+  {
+    //printf("new p: %016llx\n", (p<<8) | m);
+    //printf("(old) p >> shift: %016llx\n", (p >> shift));
+    //printf("T[%d]: %016llx\n", p >> shift, T[p >> shift]);
+    long idx = p >> shift;
+    if( idx > (sizeof(T) / sizeof(*T)) )
+    {
+      fprintf(stderr, "T index %d is out of bounds\n", idx);
+    }
+    return ((p << 8) | m) ^ T[idx];
+  }
 };
 
 class window : public rabinpoly {

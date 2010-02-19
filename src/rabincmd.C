@@ -22,6 +22,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <unistd.h>
 #include "rabinpoly.h"
 
@@ -45,6 +46,21 @@ const int FALSE = 0;
 const int TRUE  = 1;
 
 //utility functions probably belong somewhere else
+//TODO handle varargs properly
+#define DEBUG 0
+//#define DEBUG 1
+
+void debug(const char* msg, ...)
+{
+  if( DEBUG )
+  {
+    va_list argp;
+
+    va_start(argp, msg);
+    vfprintf(stderr, msg, argp);
+    va_end(argp);
+  }
+}
 
 BOOL fileExists(const char* fname)
 {
@@ -60,11 +76,25 @@ void printChunkData(
     u_int64_t fingerprint,
     u_int64_t hash)
 {
-  printf("%s chunk hash: %016llx fingerprint: %016llx length: %d\n",
+  fprintf(stderr, "%s chunk hash: %016llx fingerprint: %016llx length: %d\n",
          msgPrefix,
          hash,
          fingerprint,
          size);
+}
+
+void printChunkContents(
+    u_int64_t hash,
+    const unsigned char* buffer,
+    int size)
+{
+  fprintf(stderr, "Chunk with hash %016llx contains:\n");
+  for(int i = 0; i < size; ++i)
+  {
+    int tmp = buffer[i];
+    fprintf(stderr, "%x", tmp);
+  }
+  fprintf(stderr, "\n");
 }
 
 u_int64_t makeBitMask(int maskSize)
@@ -87,6 +117,15 @@ class ChunkBoundaryChecker
   virtual BOOL isBoundary(u_int64_t fingerprint, int size) = 0;
 };
 
+/*
+template <class T>
+inline T max(T a, T b)
+{
+  if( a > b ) return a;
+  return b;
+}
+*/
+
 class BitwiseChunkBoundaryChecker : public ChunkBoundaryChecker
 {
   private:
@@ -100,7 +139,7 @@ class BitwiseChunkBoundaryChecker : public ChunkBoundaryChecker
     : BITS(numBits),
       CHUNK_BOUNDARY_MASK(makeBitMask(BITS)), 
       MAX_SIZE(4 * (1 << BITS)),
-      MIN_SIZE(1 << (BITS - 2))
+      MIN_SIZE(max(DEFAULT_WINDOW_SIZE, 1 << (BITS - 2)))
   {
     //printf("bitmask: %16llx\n", chunkBoundaryBitMask);
     //exit(0);
@@ -280,12 +319,20 @@ protected:
 
   virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
   {
+    if( DEBUG )
+    {
+      if( hash == INT64(0x3030303237373500) )
+      {
+        printChunkContents(hash, buffer, getSize());
+      }
+    }
+
     //if this is the very first chunk, just write it out
     if( chunkLocations.size() == 0 )
     {
       fwrite(buffer, 1, getSize(), outfile);
       chunkLocations[hash] = chunkNum;
-fprintf(stderr, "Wrote first chunk %ld\n", chunkNum);
+debug("first chunk %ld of length %d with hash %016llx\n", chunkNum, getSize(), hash);
       ++chunkNum;
     }
     else
@@ -301,13 +348,13 @@ fprintf(stderr, "Wrote first chunk %ld\n", chunkNum);
         {
           unsigned char flag = 0xff;
           fwrite(&flag, 1, 1, outfile);
-fprintf(stderr, "Wrote 0xff\n");
+debug("0xff\n");
         }
 
         fwrite(buffer, 1, getSize(), outfile);
+debug("chunk %ld of length %d with hash %016llx\n", chunkNum, getSize(), hash);
 
         chunkLocations[hash] = chunkNum;
-fprintf(stderr, "Wrote chunk %ld\n", chunkNum);
         ++chunkNum;
       }
       //otherwise mark this as an already found chunk & write the location
@@ -316,7 +363,6 @@ fprintf(stderr, "Wrote chunk %ld\n", chunkNum);
         unsigned char flag = 0xfe;
         fwrite(&flag, 1, 1, outfile);
         long chunkLoc = chunkIter->second;
-fprintf(stderr, "Wrote chunk %ld again\n", chunkLoc);
 
         //To accomodate varying sizes of indexes without always using
         //4 bytes, we just store 7 bits of the number in each byte.  Then the
@@ -329,13 +375,14 @@ fprintf(stderr, "Wrote chunk %ld again\n", chunkLoc);
         {
           b = chunkLoc & 0x7f;  //grab the low 7 bits
           chunkLoc >>= 7;       //shift them out
-fprintf(stderr, "Wrote %d to file\n", b);
+debug("%d to file\n", b);
           fwrite(&b, sizeof(b), 1, outfile); //write them to the file
         }
 
         b = chunkLoc | 0x80;
         fwrite(&b, sizeof(b), 1, outfile);
-fprintf(stderr, "Wrote final %d to file\n", b);
+debug("%d to file\n", b);
+debug("reference to chunk %ld of length %d with hash %016llx\n", chunkLoc, getSize(), hash);
       }
     }
 
@@ -471,6 +518,7 @@ private:
   fpos_t             currChunkBegin;
   ExtractDataSource* eds;
   vector<fpos_t>     chunkLocations;
+  long               currChunkNum;
 protected:
   virtual void internalProcessByte(unsigned char c)
   {
@@ -488,21 +536,29 @@ protected:
 
   virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
   {
+    char *s;
     if( eds->isInPlaceChunk() )
     {
+      s="";
+
       //store the index of this chunk
       chunkLocations.push_back(currChunkBegin);
     }
     else
     {
+      s="reference to ";
+
       eds->restoreLocation();
     }
+debug("%schunk %ld of length %d with hash %016llx\n", s, currChunkNum, getSize(), hash);
 
     //write the chunk we just processed
     eds->write(buffer, getSize());
 
     //see how to handle what comes next in the input file
     int tmpGet = eds->peekByte();
+
+    //-1 indicates end of file
     if( tmpGet != -1 )
     {
       unsigned char nextByte = tmpGet;
@@ -519,7 +575,7 @@ protected:
         do
         {
           b = eds->getByte();
-  //fprintf(stderr, "Read %d from file\n", b);
+debug("%d to file\n", b);
 
           //get lower 7 bits of b
           long tmp = b & 0x7f;
@@ -531,25 +587,27 @@ protected:
         }
         while( (b & 0x80) == 0 );
 
-  fprintf(stderr, "Reading chunk %ld again\n", chunkNum);
         //now I know the chunkNum; find it in the output file & copy over the chunk
         //eds will remember where the end of the file is for later restore
         eds->readExistingChunk(chunkLocations[chunkNum]);
+
+        currChunkNum = chunkNum; //<-- just for debugging
       }
       else
       {
-  fprintf(stderr, "Reading in-place chunk %ld\n", chunkLocations.size());
         //0xff indicates another in-place chunk but is an escape character; eat it
         //see CompressChunkProcessor.internalCompleteChunk
         if( nextByte == 0xff )
         {
-  fprintf(stderr, "Eating 0xff\n");
+debug("0xff\n");
           eds->getByte();
         }
         //any other character indicates an in-place chunk as well
 
         //store the position of the next chunk
         eds->startInPlaceChunk(&currChunkBegin);
+
+        currChunkNum = chunkLocations.size();  //<-- just for debugging
       }
 
       ChunkProcessor::internalCompleteChunk(hash, fingerprint);
@@ -563,7 +621,6 @@ public:
       eds(dataSource)
   {
     eds->startInPlaceChunk(&currChunkBegin);
-fprintf(stderr, "Reading in-place chunk %ld\n", chunkLocations.size());
   }
 
   ~ExtractChunkProcessor()
@@ -586,7 +643,9 @@ void processChunks(DataSource* ds,
 
   int next;
   u_int64_t val = 0;
-  u_int64_t hash = 0;
+  //add a leading 1 to avoid the issue with rabin codes & leading 0s
+  u_int64_t hash = 1;
+  rw.slide8(1);
 
   while((next = ds->getByte()) != -1)
   {
@@ -598,8 +657,9 @@ void processChunks(DataSource* ds,
     if( chunkBoundaryChecker.isBoundary(val, chunkProcessor.getSize()) )
     {
         chunkProcessor.completeChunk(hash, val);
-        hash = 0;
+        hash = 1;
         rw.reset();
+        rw.slide8(1);
     }
   }
 

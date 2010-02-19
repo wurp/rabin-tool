@@ -27,6 +27,11 @@
 #define INT64(n) n##LL
 #define MSB64 INT64(0x8000000000000000)
                     
+//#define _LPCOX_DEBUG_ 1
+#ifdef _LPCOX_DEBUG_
+  #include <stdio.h>
+#endif
+
 u_int64_t
 polymod (u_int64_t nh, u_int64_t nl, u_int64_t d)
 {
@@ -157,24 +162,25 @@ rabinpoly::calcT ()
 //  assert (poly >= 0x100);
   int xshift = fls64 (poly) - 1;
   shift = xshift - 8;
+#ifdef _LPCOX_DEBUG_
+  printf ("rabinpoly::calcT xshift = %d\n", xshift);
+#endif
   u_int64_t T1 = polymod (0, INT64 (1) << xshift, poly);
   for (int j = 0; j < 256; j++)
   {
     T[j] = polymmult (j, T1, poly) | ((u_int64_t) j << xshift);
 #ifdef _LPCOX_DEBUG_
-    printf ("rabinpoly::calcT tmp = %llu\n", polymmult (j, T1, poly));
-    printf ("rabinpoly::calcT shift = %llu\n", ((u_int64_t) j <<
+    printf ("rabinpoly::calcT tmp = %016llx\n", polymmult (j, T1, poly));
+    printf ("rabinpoly::calcT shift = %016llx\n", ((u_int64_t) j <<
 						xshift));
-    printf ("rabinpoly::calcT xshift = %d\n", xshift);
     printf ("rabinpoly::calcT T[%d] = %llu\n", j, T[j]);
 #endif
   }
 #ifdef _LPCOX_DEBUG_
-  printf ("rabinpoly::calcT xshift = %d\n", xshift);
   printf ("rabinpoly::calcT T1 = %llu\n", T1);
   printf ("rabinpoly::calcT T = {");
   for (int i=0; i< 256; i++)
-    printf ("\t%llu \n", T[i]);
+    printf ("\t%016llx \n", T[i]);
   printf ("}\n");
 #endif
 }
