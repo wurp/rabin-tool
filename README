@@ -30,3 +30,13 @@ o History
   - 2005.12.2 version 1.0a 
     Added an example file which was missing in the initial distribution
 
+
+Bobby's notes:
+make
+cd src
+./mkrabin.sh
+./rabin -c "some file" >  "some file.rabin"
+ls -l "some file"*
+rabin -x -o "some file2" "some file.rabin"
+diff "some file" "some file2"
+
