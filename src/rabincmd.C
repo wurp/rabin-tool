@@ -357,7 +357,8 @@ debug("chunk %ld of length %d with hash %016llx\n", chunkNum, getSize(), hash);
       {
         unsigned char flag = 0xfe;
         fwrite(&flag, 1, 1, outfile);
-        long chunkLoc = chunkIter->second;
+        //chunkLoc is how far back from this chunk did the copy last occur
+        long chunkLoc = chunkNum - chunkIter->second;
 
         //To accomodate varying sizes of indexes without always using
         //4 bytes, we just store 7 bits of the number in each byte.  Then the
@@ -569,7 +570,7 @@ debug("%schunk %ld of length %d with hash %016llx\n", s, currChunkNum, getSize()
       {
         eds->getByte();
 
-        long chunkNum = 0;
+        long chunkLoc = 0;
 
         unsigned char b = 0;
         int i = 0;
@@ -580,15 +581,18 @@ debug("%d to file\n", b);
 
           //get lower 7 bits of b
           long tmp = b & 0x7f;
-          //shift it to where it goes in chunkNum (least significant byte is first)
+          //shift it to where it goes in chunkLoc (least significant byte is first)
           tmp <<= (7 * i);
-          chunkNum |= tmp;
+          chunkLoc |= tmp;
 
           ++i;
         }
         while( (b & 0x80) == 0 );
 
-        //now I know the chunkNum; find it in the output file & copy over the chunk
+        //the chunk loc is how many back to go from the last chunk
+        int chunkNum = chunkLocations.size() - chunkLoc;
+
+        //now I know the chunkLoc; find it in the output file & copy over the chunk
         //eds will remember where the end of the file is for later restore
         eds->readExistingChunk(chunkLocations[chunkNum], &currChunkBegin);
 
