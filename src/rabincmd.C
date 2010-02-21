@@ -331,9 +331,7 @@ protected:
     if( chunkLocations.size() == 0 )
     {
       fwrite(buffer, 1, getSize(), outfile);
-      chunkLocations[hash] = chunkNum;
 debug("first chunk %ld of length %d with hash %016llx\n", chunkNum, getSize(), hash);
-      ++chunkNum;
     }
     else
     {
@@ -353,9 +351,6 @@ debug("0xff\n");
 
         fwrite(buffer, 1, getSize(), outfile);
 debug("chunk %ld of length %d with hash %016llx\n", chunkNum, getSize(), hash);
-
-        chunkLocations[hash] = chunkNum;
-        ++chunkNum;
       }
       //otherwise mark this as an already found chunk & write the location
       else
@@ -385,6 +380,9 @@ debug("%d to file\n", b);
 debug("reference to chunk %ld of length %d with hash %016llx\n", chunkLoc, getSize(), hash);
       }
     }
+
+    chunkLocations[hash] = chunkNum;
+    ++chunkNum;
 
     ChunkProcessor::internalCompleteChunk(hash, fingerprint);
   }
@@ -469,8 +467,11 @@ public:
     fwrite(buffer, 1, size, raf);
   }
 
-  void readExistingChunk(fpos_t loc)
+  void readExistingChunk(fpos_t loc, fpos_t* currChunkBegin)
   {
+    //the chunk we're about to read from storedLoc we will write here
+    fgetpos(raf, currChunkBegin);
+
     fgetpos(raf, &storedLoc);
     fsetpos(raf, &loc);
 
@@ -536,13 +537,13 @@ protected:
 
   virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
   {
+    //store the index of this chunk
+    chunkLocations.push_back(currChunkBegin);
+
     char *s;
     if( eds->isInPlaceChunk() )
     {
       s="";
-
-      //store the index of this chunk
-      chunkLocations.push_back(currChunkBegin);
     }
     else
     {
@@ -589,7 +590,7 @@ debug("%d to file\n", b);
 
         //now I know the chunkNum; find it in the output file & copy over the chunk
         //eds will remember where the end of the file is for later restore
-        eds->readExistingChunk(chunkLocations[chunkNum]);
+        eds->readExistingChunk(chunkLocations[chunkNum], &currChunkBegin);
 
         currChunkNum = chunkNum; //<-- just for debugging
       }
