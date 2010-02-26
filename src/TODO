@@ -1,1 +1,2 @@
-Get chunk position in file when extracting repeated chunk
+Use algorithm to find all 'b' length chunks which are repeated, then stretch match out as far as possible.
+Use rabin squishy bitsets (false positives possible; false negatives impossible) to figure out which hashes are repeated, and use two passes to find which hashes have to be retained to minimize memory usage?

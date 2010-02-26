@@ -715,7 +715,7 @@ public:
       extract    (FALSE),
       print      (FALSE),
       reconstruct(FALSE),
-      bits       (12)
+      bits       (7)
   {
     setOptionsFromArguments(argc, argv);
     validateOptionCombination();
