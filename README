@@ -6,22 +6,15 @@ o What's it good for?
   Rabin coding generates a semi-unique fingerprint for each character in a
   data stream, based on the content of the N characters before it.  This
   means the fingerprint is stable for the same content, regardless of where
-  that content occurs. So, for example, if there is a snippet of a binary
-  that's found in a virus, you can scan for the rabin fingerprint of that
-  snippet in another binary quickly, and check to see if the virus is
-  present.
+  that content occurs.
   
   You can also break a file into chunks based on the modulo of the
-  fingerprint, so the chunk boundaries are the same, even if you change
-  content in the middle of file, except around the changed parts. This
-  means you can send or store updates to a large file without transmitting
-  the whole file. What's more, if the file has repeated chunks, you only
-  need store the content once, along with a list of fingerprints.
-
-  If the number of possible expected values a chunk may have is very small
-  compared to the number of possible values of the fingerprint, then
-  you may treat the fingerprints as unique. For example, a 128 bit
-  fingerprint should be sufficient for a 30 byte window of english text.
+  fingerprint, so the chunk boundaries are the same (except around the
+  changed parts) even if you change content in the middle of file. By
+  comparing chunk hashes you can send or store updates to a large file
+  without transmitting the whole file. What's more, if the file has
+  repeated chunks, you only need store the content once, along with
+  a list of fingerprints.
   
 o Function
   Given a stream of input, compute the rabin-fingerprint of a N-byte-long 
@@ -52,7 +45,7 @@ o History
     Added an example file which was missing in the initial distribution
 
 
-Bobby's notes:
+Example of file compression using rabin:
 make
 cd src
 ./mkrabin.sh
