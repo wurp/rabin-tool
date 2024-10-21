@@ -111,9 +111,19 @@ u_int64_t makeBitMask(int maskSize)
   return retval;
 }
 
+/**
+ * @class ChunkBoundaryChecker
+ * @brief Abstract base class for determining chunk boundaries in the Rabin chunking algorithm.
+ */
 class ChunkBoundaryChecker
 {
   public:
+  /**
+   * @brief Determines if the current position is a chunk boundary.
+   * @param fingerprint The Rabin fingerprint at the current position.
+   * @param size The current size of the chunk.
+   * @return True if the current position is a chunk boundary, false otherwise.
+   */
   virtual BOOL isBoundary(u_int64_t fingerprint, int size) = 0;
 };
 
@@ -126,6 +136,10 @@ inline T max(T a, T b)
 }
 */
 
+/**
+ * @class BitwiseChunkBoundaryChecker
+ * @brief Concrete implementation of ChunkBoundaryChecker using a bitwise method to determine chunk boundaries.
+ */
 class BitwiseChunkBoundaryChecker : public ChunkBoundaryChecker
 {
   private:
@@ -145,16 +159,41 @@ class BitwiseChunkBoundaryChecker : public ChunkBoundaryChecker
     //exit(0);
   }
 
+  /**
+   * @brief Determines if the current position is a chunk boundary using a bitwise method.
+   * 
+   * This method uses a bitwise AND operation to check if the lower bits of the 
+   * Rabin fingerprint are all zero. It also enforces minimum and maximum chunk sizes.
+   * 
+   * The method returns true (indicating a chunk boundary) if either:
+   * 1. The lower BITS of the fingerprint are all zero (fingerprint & CHUNK_BOUNDARY_MASK == 0)
+   *    AND the current chunk size is at least the minimum size (size >= MIN_SIZE)
+   * OR
+   * 2. The maximum chunk size has been reached (size >= MAX_SIZE)
+   * 
+   * @param fingerprint The Rabin fingerprint at the current position.
+   * @param size The current size of the chunk.
+   * @return True if the current position is a chunk boundary, false otherwise.
+   */
   virtual BOOL isBoundary(u_int64_t fingerprint, int size)
   {
       return (((fingerprint & CHUNK_BOUNDARY_MASK) == 0 && size >= MIN_SIZE) ||
               (MAX_SIZE != -1 && size >= MAX_SIZE) );
   }
 
+
+  /**
+   * @brief Gets the maximum allowed chunk size.
+   * @return The maximum chunk size.
+   */
   int getMaxChunkSize() { return MAX_SIZE; }
 
 };
 
+/**
+ * @class ChunkProcessor
+ * @brief Base class for processing chunks in the Rabin chunking algorithm.
+ */
 class ChunkProcessor
 {
 private:
@@ -176,11 +215,21 @@ public:
 public:
   ChunkProcessor() : size(0) {}
 
+/**
+   * @brief Processes a single byte of the input data.
+   * @param c The byte to process.
+   */
   void processByte(unsigned char c) 
   {
      internalProcessByte(c);
   }
 
+
+  /**
+   * @brief Completes processing of the current chunk.
+   * @param hash The hash of the completed chunk.
+   * @param fingerprint The Rabin fingerprint of the completed chunk.
+   */
   void completeChunk(u_int64_t hash, u_int64_t fingerprint)
   {
     internalCompleteChunk(hash, fingerprint);
@@ -216,18 +265,31 @@ public:
   }
 };
 
+/**
+ * @class CreateFileChunkProcessor
+ * @brief ChunkProcessor implementation that writes chunks to separate files.
+ */
 class CreateFileChunkProcessor : public ChunkProcessor
 {
 private:
   string      chunkDir;
   FILE*       tmpChunkFile;
 protected:
+  /**
+   * @brief Writes a byte to the current chunk file.
+   * @param c The byte to write.
+   */
   virtual void internalProcessByte(unsigned char c)
   {
     ChunkProcessor::internalProcessByte(c);
     fputc(c, getTmpChunkFile());
   }
 
+  /**
+   * @brief Completes the current chunk file and renames it based on the chunk hash.
+   * @param hash The hash of the completed chunk.
+   * @param fingerprint The Rabin fingerprint of the completed chunk.
+   */
   virtual void internalCompleteChunk(u_int64_t hash, u_int64_t fingerprint)
   {
     ChunkProcessor::internalCompleteChunk(hash, fingerprint);
@@ -294,6 +356,10 @@ public:
   }
 };
 
+/**
+ * @class CompressChunkProcessor
+ * @brief ChunkProcessor implementation that performs chunk-based compression.
+ */
 class CompressChunkProcessor : public ChunkProcessor
 {
 private:
@@ -409,12 +475,24 @@ public:
   }
 };
 
+/**
+ * @class DataSource
+ * @brief Abstract base class for providing input data to the Rabin chunking algorithm.
+ */
 class DataSource
 {
 public:
+  /**
+   * @brief Gets the next byte from the data source.
+   * @return The next byte, or -1 if the end of the data source is reached.
+   */
   virtual int getByte() = 0;
 };
 
+/**
+ * @class RawFileDataSource
+ * @brief Concrete implementation of DataSource for reading from a file.
+ */
 class RawFileDataSource : public DataSource
 {
 private:
@@ -432,6 +510,10 @@ public:
   }
 };
 
+/**
+ * @class ExtractDataSource
+ * @brief DataSource implementation for extracting data from a compressed file.
+ */
 class ExtractDataSource : public DataSource
 {
 private:
@@ -441,6 +523,11 @@ private:
   BOOL   inPlaceChunk;
   fpos_t storedLoc;
 public:
+  /**
+   * @brief Constructs an ExtractDataSource with the specified output and input files.
+   * @param outfileName The name of the output file.
+   * @param infile The input file containing compressed data.
+   */
   ExtractDataSource(const char* outfileName, FILE* infile)
     : raf(NULL),
       inPlaceChunk(TRUE),
@@ -512,6 +599,10 @@ public:
   }
 };
 
+/**
+ * @class ExtractChunkProcessor
+ * @brief ChunkProcessor implementation for extracting chunks from compressed data.
+ */
 class ExtractChunkProcessor : public ChunkProcessor
 {
 private:
@@ -638,6 +729,13 @@ public:
   ExtractDataSource* getDataSource() { return eds; }
 };
 
+
+/**
+ * @brief Main function to process chunks using the Rabin chunking algorithm.
+ * @param ds The DataSource providing input data.
+ * @param chunkBoundaryChecker The ChunkBoundaryChecker to determine chunk boundaries.
+ * @param chunkProcessor The ChunkProcessor to process the chunks.
+ */
 void processChunks(DataSource* ds,
                    ChunkBoundaryChecker& chunkBoundaryChecker,
                    ChunkProcessor& chunkProcessor)
@@ -848,6 +946,10 @@ unsupported("-r TODO");
   }
 };
 
+/**
+ * @class OptionsChunkProcessor
+ * @brief ChunkProcessor implementation that combines multiple chunk processors based on selected options.
+ */
 class OptionsChunkProcessor : public ChunkProcessor
 {
 private:
